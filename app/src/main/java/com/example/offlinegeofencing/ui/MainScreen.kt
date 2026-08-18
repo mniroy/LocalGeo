@@ -22,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,17 +30,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.offlinegeofencing.R
 import com.example.offlinegeofencing.bluetooth.BluetoothConnectionState
 import com.example.offlinegeofencing.service.GpsStatus
 
@@ -659,6 +660,15 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
 
                     SettingsSubpage.ABOUT -> {
                         // Subpage 5: About App & Publisher Copyright
+                        val appIconBitmap = remember(context) {
+                            try {
+                                val drawable = context.packageManager.getApplicationIcon(context.packageName)
+                                drawable.toBitmap(192, 192).asImageBitmap()
+                            } catch (e: Exception) {
+                                null
+                            }
+                        }
+
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -666,13 +676,23 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Image(
-                                painter = painterResource(id = R.mipmap.ic_launcher),
-                                contentDescription = "LocalGeo Logo",
-                                modifier = Modifier
-                                    .size(96.dp)
-                                    .clip(RoundedCornerShape(20.dp))
-                            )
+                            if (appIconBitmap != null) {
+                                Image(
+                                    bitmap = appIconBitmap,
+                                    contentDescription = "LocalGeo Logo",
+                                    modifier = Modifier
+                                        .size(96.dp)
+                                        .clip(RoundedCornerShape(20.dp))
+                                )
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.LocationOn,
+                                    contentDescription = "LocalGeo Logo",
+                                    tint = Color(0xFF0284C7),
+                                    modifier = Modifier.size(80.dp)
+                                )
+                            }
+
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
                                 text = "LocalGeo",

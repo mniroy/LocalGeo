@@ -72,6 +72,8 @@ class GeofenceTrackingService : Service(), LocationListener {
 
         private val _trackingState = MutableStateFlow(TrackingState())
         val trackingState: StateFlow<TrackingState> = _trackingState.asStateFlow()
+
+        val isNotificationPersistent = MutableStateFlow(true)
     }
 
     private val binder = LocalBinder()
@@ -86,6 +88,7 @@ class GeofenceTrackingService : Service(), LocationListener {
     private var pendingKecamatan: String? = null
     private var pendingCandidate: SpatialResult? = null
     private var consecutiveCount: Int = 0
+    private var currentNotificationText: String = "Mencari Sinyal GPS / A-GPS..."
 
     inner class LocalBinder : Binder() {
         fun getService(): GeofenceTrackingService = this@GeofenceTrackingService
@@ -133,12 +136,13 @@ class GeofenceTrackingService : Service(), LocationListener {
             .setContentText(text)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)
+            .setOngoing(isNotificationPersistent.value)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
     private fun updateNotification(text: String) {
+        currentNotificationText = text
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(NOTIFICATION_ID, buildNotification(text))
     }

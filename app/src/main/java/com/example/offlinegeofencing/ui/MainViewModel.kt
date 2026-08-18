@@ -32,6 +32,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val bluetoothManager by lazy { BluetoothManager.getInstance(getApplication()) }
     val bluetoothState = bluetoothManager.connectionState
 
+    val isNotificationPersistent = GeofenceTrackingService.isNotificationPersistent
+
     private val dbHelper by lazy { SpatialDbHelper(getApplication()) }
     private val pipEngine by lazy { PipEngine(dbHelper) }
 
@@ -46,6 +48,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         SimulationPoint("Lapangan Merdeka (Medan)", 3.5922, 98.6785),
         SimulationPoint("Pantai Losari (Makassar)", -5.1477, 119.4088)
     )
+
+    fun setNotificationPersistent(persistent: Boolean) {
+        GeofenceTrackingService.isNotificationPersistent.value = persistent
+    }
 
     fun getPairedBluetoothDevices(): List<BluetoothDeviceInfo> {
         return bluetoothManager.getPairedDevices()

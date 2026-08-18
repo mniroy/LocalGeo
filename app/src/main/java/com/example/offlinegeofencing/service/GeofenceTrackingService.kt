@@ -115,7 +115,7 @@ class GeofenceTrackingService : Service(), LocationListener {
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID, "LocalGeo Tracking",
+                CHANNEL_ID, "Daerah Sini Tracking",
                 NotificationManager.IMPORTANCE_LOW
             ).apply { description = "Real-time offline Kecamatan geofencing" }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -124,20 +124,16 @@ class GeofenceTrackingService : Service(), LocationListener {
     }
 
     private fun buildNotification(text: String): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
+        val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("LocalGeo Tracking")
+            .setContentTitle("Daerah Sini Tracking")
             .setContentText(text)
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
-            .setOngoing(isNotificationPersistent.value)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
             .build()
     }
 

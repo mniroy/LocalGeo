@@ -679,7 +679,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             if (appIconBitmap != null) {
                                 Image(
                                     bitmap = appIconBitmap,
-                                    contentDescription = "LocalGeo Logo",
+                                    contentDescription = "Daerah Sini Logo",
                                     modifier = Modifier
                                         .size(96.dp)
                                         .clip(RoundedCornerShape(20.dp))
@@ -687,7 +687,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             } else {
                                 Icon(
                                     imageVector = Icons.Default.LocationOn,
-                                    contentDescription = "LocalGeo Logo",
+                                    contentDescription = "Daerah Sini Logo",
                                     tint = Color(0xFF0284C7),
                                     modifier = Modifier.size(80.dp)
                                 )
@@ -695,7 +695,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
 
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = "LocalGeo",
+                                text = "Daerah Sini",
                                 fontSize = 28.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.SansSerif,
@@ -728,7 +728,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                         color = primaryTextColor
                                     )
                                     Text(
-                                        text = "LocalGeo adalah aplikasi pendeteksi lokasi wilayah Kecamatan, Kota/Kabupaten, dan Provinsi se-Indonesia secara offline tanpa memerlukan jaringan internet.",
+                                        text = "Daerah Sini adalah aplikasi pendeteksi lokasi wilayah Kecamatan, Kota/Kabupaten, dan Provinsi se-Indonesia secara offline tanpa memerlukan jaringan internet.",
                                         fontSize = 13.sp,
                                         fontFamily = FontFamily.SansSerif,
                                         color = secondaryTextColor,

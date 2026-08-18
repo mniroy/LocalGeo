@@ -703,7 +703,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Versi 1.0.0 (Build 1)",
+                                text = "Versi 1.0.0",
                                 fontSize = 14.sp,
                                 fontFamily = FontFamily.SansSerif,
                                 color = secondaryTextColor
@@ -728,7 +728,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                         color = primaryTextColor
                                     )
                                     Text(
-                                        text = "LocalGeo adalah aplikasi offline real-time geofencing wilayah Kecamatan se-Indonesia berbasis SQLite spatial ray-casting dan integrasi serial Bluetooth ke ESP32.",
+                                        text = "LocalGeo adalah aplikasi pendeteksi lokasi wilayah Kecamatan, Kota/Kabupaten, dan Provinsi se-Indonesia secara offline tanpa memerlukan jaringan internet.",
                                         fontSize = 13.sp,
                                         fontFamily = FontFamily.SansSerif,
                                         color = secondaryTextColor,
@@ -740,18 +740,11 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             Spacer(modifier = Modifier.height(32.dp))
 
                             Text(
-                                text = "© 2026 MNIROY",
+                                text = "© MNIROY",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.SansSerif,
                                 color = primaryTextColor
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "All rights reserved. Publisher: MNIROY",
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.SansSerif,
-                                color = secondaryTextColor
                             )
                         }
                     }

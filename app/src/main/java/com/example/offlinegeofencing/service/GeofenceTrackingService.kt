@@ -124,16 +124,20 @@ class GeofenceTrackingService : Service(), LocationListener {
     }
 
     private fun buildNotification(text: String): Notification {
-        val intent = Intent(this, MainActivity::class.java)
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
         val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+            this, 0, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("Daerah Sini Tracking")
             .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
-            .setOngoing(true)
+            .setOngoing(isNotificationPersistent.value)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
     }
 
@@ -312,6 +316,21 @@ class GeofenceTrackingService : Service(), LocationListener {
     }
 
     override fun onBind(intent: Intent?): IBinder = binder
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.d(TAG, "onTaskRemoved: app task removed from recents. isPersistent=${isNotificationPersistent.value}")
+        if (!isNotificationPersistent.value) {
+            stopTracking()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+            stopSelf()
+        }
+    }
 
     override fun onDestroy() {
         super.onDestroy()

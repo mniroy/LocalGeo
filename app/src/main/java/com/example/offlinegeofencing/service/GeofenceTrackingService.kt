@@ -1,5 +1,6 @@
 package com.example.offlinegeofencing.service
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
@@ -8,16 +9,20 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Binder
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 import com.example.offlinegeofencing.MainActivity
 import com.example.offlinegeofencing.R
 import com.example.offlinegeofencing.bluetooth.BluetoothManager
@@ -51,10 +56,18 @@ data class TrackingState(
     val accuracyMeters: Float = 0f,
     val latitude: Double = 0.0,
     val longitude: Double = 0.0,
+    val altitude: Double = 0.0,
+    val speed: Float = 0f,
+    val bearing: Float = 0f,
+    val satellitesInView: Int = 0,
+    val satellitesUsedInFix: Int = 0,
+    val gnssConstellationsSummary: String = "Mencari data satelit...",
     val nameKecamatan: String = "",
     val nameKabupaten: String = "",
     val nameProvinsi: String = "",
     val evaluatedVertices: Int = 0,
+    val candidatesCount: Int = 0,
+    val candidateNamesStr: String = "",
     val searchLatencyMs: Double = 0.0,
     val providerType: String = "GPS / A-GPS",
     val statusText: String = "Mencari Sinyal GPS / A-GPS..."
@@ -85,6 +98,7 @@ class GeofenceTrackingService : Service(), LocationListener {
     private lateinit var locationCallback: LocationCallback
     private lateinit var pipEngine: PipEngine
 
+    private var gnssStatusCallback: GnssStatus.Callback? = null
     private var pendingKecamatan: String? = null
     private var pendingCandidate: SpatialResult? = null
     private var consecutiveCount: Int = 0
@@ -171,6 +185,8 @@ class GeofenceTrackingService : Service(), LocationListener {
     private fun startTracking() {
         Log.d(TAG, "startTracking() invoked")
         try {
+            registerGnssStatusCallback()
+
             fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
                 Log.d(TAG, "lastLocation from Fused: ${loc?.latitude}, ${loc?.longitude}")
                 if (loc != null) processLocationUpdate(loc, "Last Known (Fused A-GPS)")
@@ -215,8 +231,64 @@ class GeofenceTrackingService : Service(), LocationListener {
         }
     }
 
+    private fun registerGnssStatusCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            try {
+                gnssStatusCallback = object : GnssStatus.Callback() {
+                    override fun onSatelliteStatusChanged(status: GnssStatus) {
+                        val totalCount = status.satelliteCount
+                        var usedCount = 0
+                        val constellationCounts = mutableMapOf<String, Int>()
+
+                        for (i in 0 until totalCount) {
+                            if (status.usedInFix(i)) {
+                                usedCount++
+                            }
+                            val constName = when (status.getConstellationType(i)) {
+                                GnssStatus.CONSTELLATION_GPS -> "GPS"
+                                GnssStatus.CONSTELLATION_GLONASS -> "GLONASS"
+                                GnssStatus.CONSTELLATION_BEIDOU -> "BDS"
+                                GnssStatus.CONSTELLATION_GALILEO -> "GALILEO"
+                                GnssStatus.CONSTELLATION_QZSS -> "QZSS"
+                                GnssStatus.CONSTELLATION_SBAS -> "SBAS"
+                                else -> "Lainnya"
+                            }
+                            constellationCounts[constName] = (constellationCounts[constName] ?: 0) + 1
+                        }
+
+                        val summary = constellationCounts.entries.joinToString(", ") { "${it.key}: ${it.value}" }
+                        _trackingState.value = _trackingState.value.copy(
+                            satellitesInView = totalCount,
+                            satellitesUsedInFix = usedCount,
+                            gnssConstellationsSummary = if (summary.isNotEmpty()) summary else "Tidak ada satelit terdeteksi"
+                        )
+                    }
+                }
+
+                if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    locationManager.registerGnssStatusCallback(gnssStatusCallback!!, Handler(Looper.getMainLooper()))
+                    Log.d(TAG, "GnssStatusCallback registered successfully")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error registering GnssStatusCallback: ${e.message}")
+            }
+        }
+    }
+
+    private fun unregisterGnssStatusCallback() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && gnssStatusCallback != null) {
+            try {
+                locationManager.unregisterGnssStatusCallback(gnssStatusCallback!!)
+                Log.d(TAG, "GnssStatusCallback unregistered")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error unregistering GnssStatusCallback: ${e.message}")
+            }
+        }
+    }
+
     private fun stopTracking() {
         try {
+            unregisterGnssStatusCallback()
             fusedLocationClient.removeLocationUpdates(locationCallback)
             locationManager.removeUpdates(this)
         } catch (e: Exception) {
@@ -243,6 +315,9 @@ class GeofenceTrackingService : Service(), LocationListener {
         _trackingState.value = _trackingState.value.copy(
             latitude = lat,
             longitude = lon,
+            altitude = location.altitude,
+            speed = location.speed,
+            bearing = location.bearing,
             providerType = providerName,
             accuracyMeters = acc
         )
@@ -252,15 +327,22 @@ class GeofenceTrackingService : Service(), LocationListener {
             val result = pipEngine.findSubDistrict(lon, lat)
             Log.d(TAG, "PIP result: matched=${result.matched}, kec=${result.nameKecamatan}, vertices=${result.evaluatedVertices}")
 
+            val candidateNamesStr = result.candidateNames.joinToString(", ")
+
             if (!result.matched) {
                 pendingKecamatan = null
                 consecutiveCount = 0
-                _trackingState.value = TrackingState(
+                _trackingState.value = _trackingState.value.copy(
                     gpsStatus = GpsStatus.OUT_OF_BOUNDS,
                     accuracyMeters = acc,
                     latitude = lat,
                     longitude = lon,
+                    altitude = location.altitude,
+                    speed = location.speed,
+                    bearing = location.bearing,
                     evaluatedVertices = result.evaluatedVertices,
+                    candidatesCount = result.candidatesCount,
+                    candidateNamesStr = candidateNamesStr,
                     searchLatencyMs = result.executionTimeMs,
                     providerType = providerName,
                     statusText = "Di Luar Batas Wilayah Darat / Perairan"
@@ -289,15 +371,20 @@ class GeofenceTrackingService : Service(), LocationListener {
             val gpsStatus = if (acc > 50f) GpsStatus.LOW_ACCURACY else GpsStatus.SATELLITE_LOCKED
             val statusText = if (acc > 50f) "Low Accuracy ($providerName ±${acc.toInt()}m)" else "Fix Locked ($providerName ±${acc.toInt()}m)"
 
-            _trackingState.value = TrackingState(
+            _trackingState.value = _trackingState.value.copy(
                 gpsStatus = gpsStatus,
                 accuracyMeters = acc,
                 latitude = lat,
                 longitude = lon,
+                altitude = location.altitude,
+                speed = location.speed,
+                bearing = location.bearing,
                 nameKecamatan = result.nameKecamatan,
                 nameKabupaten = result.nameKabupaten,
                 nameProvinsi = result.nameProvinsi,
                 evaluatedVertices = result.evaluatedVertices,
+                candidatesCount = result.candidatesCount,
+                candidateNamesStr = candidateNamesStr,
                 searchLatencyMs = result.executionTimeMs,
                 providerType = providerName,
                 statusText = statusText

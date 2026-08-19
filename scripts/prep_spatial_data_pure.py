@@ -48,18 +48,17 @@ def ramer_douglas_peucker(points, epsilon):
     else:
         return [points[0], points[end]]
 
-def simplify_ring(coords, epsilon=0.003):
-    if len(coords) <= 4:
+def simplify_ring(coords, epsilon=0.0001):
+    if epsilon <= 0 or len(coords) <= 4:
         return coords
     simplified = ramer_douglas_peucker(coords, epsilon)
-    # Ensure ring remains closed if original was closed
     if len(simplified) < 4:
         return coords
     if simplified[0] != simplified[-1]:
         simplified.append(simplified[0])
     return simplified
 
-def encode_geojson_geometry(geom, epsilon=0.003):
+def encode_geojson_geometry(geom, epsilon=0.0001):
     gtype = geom.get('type', '')
     coords = geom.get('coordinates', [])
 
@@ -71,20 +70,24 @@ def encode_geojson_geometry(geom, epsilon=0.003):
     else:
         return None, 0, 0, 0, 0, 0
 
-    encoded_polys = []
     min_lon, max_lon = float('inf'), float('-inf')
     min_lat, max_lat = float('inf'), float('-inf')
 
+    # Compute exact BBOX from original geometry points
     for poly in polys:
-        encoded_rings = []
         for ring in poly:
-            simplified = simplify_ring(ring, epsilon)
-            for pt in simplified:
+            for pt in ring:
                 lon, lat = pt[0], pt[1]
                 if lon < min_lon: min_lon = lon
                 if lon > max_lon: max_lon = lon
                 if lat < min_lat: min_lat = lat
                 if lat > max_lat: max_lat = lat
+
+    encoded_polys = []
+    for poly in polys:
+        encoded_rings = []
+        for ring in poly:
+            simplified = simplify_ring(ring, epsilon)
             encoded_rings.append(simplified)
         encoded_polys.append(encoded_rings)
 
@@ -151,7 +154,7 @@ def main():
         if not geom:
             continue
 
-        blob, min_lon, max_lon, min_lat, max_lat, num_polys = encode_geojson_geometry(geom, epsilon=0.003)
+        blob, min_lon, max_lon, min_lat, max_lat, num_polys = encode_geojson_geometry(geom, epsilon=0.0001)
         if blob is None or num_polys == 0:
             continue
 

@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -43,6 +45,26 @@ import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.offlinegeofencing.bluetooth.BluetoothConnectionState
 import com.example.offlinegeofencing.service.GpsStatus
+
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.input.KeyboardType
+import kotlin.math.roundToInt
 
 enum class AppTheme(val label: String) {
     SYSTEM("Sistem Default"),
@@ -71,6 +93,7 @@ enum class SettingsSubpage(val title: String) {
     DISPLAY("Tampilan & Rotasi Layar"),
     THEME("Tema Warna"),
     NOTIFICATION("Notifikasi Persisten"),
+    DEBUG("Fitur Debug & Telemetry GPS"),
     ABOUT("Tentang Aplikasi")
 }
 
@@ -93,6 +116,8 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     val simState by viewModel.simulatedState.collectAsState()
     val btState by viewModel.bluetoothState.collectAsState()
     val isPersistentNotification by viewModel.isNotificationPersistent.collectAsState()
+    val compassHeading by viewModel.compassHeading.collectAsState()
+    val nextKecamatanAhead by viewModel.nextKecamatanAhead.collectAsState()
 
     var selectedTheme by remember { mutableStateOf(AppTheme.SYSTEM) }
     var selectedRotation by remember { mutableStateOf(ScreenRotation.AUTO) }
@@ -100,6 +125,15 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     var isFullScreen by remember { mutableStateOf(false) }
     var showSettingsPage by remember { mutableStateOf(false) }
     var currentSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
+
+    // Intercept hardware system back button when settings page or subpage is active
+    BackHandler(enabled = showSettingsPage) {
+        if (currentSubpage != SettingsSubpage.MAIN) {
+            currentSubpage = SettingsSubpage.MAIN
+        } else {
+            showSettingsPage = false
+        }
+    }
 
     var hasLocationPermission by remember {
         mutableStateOf(
@@ -208,6 +242,8 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(backgroundColor)
+                .statusBarsPadding()
+                .navigationBarsPadding()
         ) {
             Column(
                 modifier = Modifier
@@ -306,7 +342,19 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
 
                             HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.15f))
 
-                            // Menu 5: About App
+                            // Menu 5: Debug & Telemetry GPS
+                            val debugSubtitle = "Koordinat: ${"%.4f".format(state.latitude)}, ${"%.4f".format(state.longitude)} • Satelit: ${state.satellitesUsedInFix}/${state.satellitesInView}"
+                            SettingsMenuItem(
+                                title = "Fitur Debug & Telemetry GPS",
+                                subtitle = debugSubtitle,
+                                primaryTextColor = primaryTextColor,
+                                secondaryTextColor = secondaryTextColor,
+                                onClick = { currentSubpage = SettingsSubpage.DEBUG }
+                            )
+
+                            HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.15f))
+
+                            // Menu 6: About App
                             SettingsMenuItem(
                                 title = "Tentang Aplikasi",
                                 subtitle = "Versi 1.0.0 • © MNIROY",
@@ -658,6 +706,213 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                         }
                     }
 
+                    SettingsSubpage.DEBUG -> {
+                        // Subpage: Debug & Telemetry GPS (Monochrome System Style)
+                        val clipboardManager = LocalClipboardManager.current
+                        var inputLat by remember { mutableStateOf(if (state.latitude != 0.0) state.latitude.toString() else "-6.1754") }
+                        var inputLon by remember { mutableStateOf(if (state.longitude != 0.0) state.longitude.toString() else "106.8272") }
+
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Text(
+                                text = "DIAGNOSTIK & TELEMETRI GPS LOKAL",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp,
+                                fontFamily = FontFamily.Default,
+                                color = secondaryTextColor,
+                                letterSpacing = 1.sp
+                            )
+
+                            // Card 1: GPS Telemetry
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) Color(0xFF121212) else Color(0xFFF2F2F2)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Telemetri Hardware GPS",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        fontFamily = FontFamily.Default,
+                                        color = primaryTextColor
+                                    )
+                                    HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.2f))
+                                    DebugDataRow("Latitude", "%.6f".format(state.latitude), primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Longitude", "%.6f".format(state.longitude), primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Altitude", "%.1f m".format(state.altitude), primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Akurasi (Accuracy)", "±%.1f meter".format(state.accuracyMeters), primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Provider Type", state.providerType, primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Kecepatan & Arah", "%.1f m/s, %.1f°".format(state.speed, state.bearing), primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Status Telemetri", state.statusText, primaryTextColor, secondaryTextColor)
+                                }
+                            }
+
+                            // Card 2: Satellite (GNSS) Status
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) Color(0xFF121212) else Color(0xFFF2F2F2)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Status Satelit (GNSS Hardware)",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        fontFamily = FontFamily.Default,
+                                        color = primaryTextColor
+                                    )
+                                    HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.2f))
+                                    DebugDataRow("Satelit Digunakan (Fix)", "${state.satellitesUsedInFix} Satelit", primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Satelit Terdeteksi (View)", "${state.satellitesInView} Satelit", primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Rincian Konstelasi", state.gnssConstellationsSummary, primaryTextColor, secondaryTextColor)
+                                }
+                            }
+
+                            // Card 3: Spatial PIP Engine Computation Result
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) Color(0xFF121212) else Color(0xFFF2F2F2)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = "Hasil Komputasi Spatial (Ray-Casting PIP)",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        fontFamily = FontFamily.Default,
+                                        color = primaryTextColor
+                                    )
+                                    HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.2f))
+                                    DebugDataRow("Status Wilayah", if (state.gpsStatus == GpsStatus.OUT_OF_BOUNDS) "DI LUAR WILAYAH (OUT OF BOUNDS)" else "TERDETEKSI (MATCHED)", primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Kecamatan", state.nameKecamatan.ifEmpty { "-" }, primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Kabupaten / Kota", state.nameKabupaten.ifEmpty { "-" }, primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Provinsi", state.nameProvinsi.ifEmpty { "-" }, primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Candidate BBOX Count", "${state.candidatesCount} candidate", primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Candidate BBOX List", state.candidateNamesStr.ifEmpty { "None (0 bbox match)" }, primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Titik Sudut Dievaluasi", "${state.evaluatedVertices} vertices", primaryTextColor, secondaryTextColor)
+                                    DebugDataRow("Waktu Pencarian (Latency)", "%.2f ms".format(state.searchLatencyMs), primaryTextColor, secondaryTextColor)
+                                }
+                            }
+
+                            // Card 4: Manual Test & Clipboard Tools
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = if (isDark) Color(0xFF121212) else Color(0xFFF2F2F2)
+                                ),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        text = "Pengujian Koordinat Manual",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 15.sp,
+                                        fontFamily = FontFamily.Default,
+                                        color = primaryTextColor
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = inputLat,
+                                            onValueChange = { inputLat = it },
+                                            label = { Text("Latitude", fontFamily = FontFamily.Default) },
+                                            modifier = Modifier.weight(1f),
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                        OutlinedTextField(
+                                            value = inputLon,
+                                            onValueChange = { inputLon = it },
+                                            label = { Text("Longitude", fontFamily = FontFamily.Default) },
+                                            modifier = Modifier.weight(1f),
+                                            singleLine = true,
+                                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                                        )
+                                    }
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Button(
+                                            onClick = {
+                                                val lat = inputLat.toDoubleOrNull()
+                                                val lon = inputLon.toDoubleOrNull()
+                                                if (lat != null && lon != null) {
+                                                    viewModel.simulateCoordinate(lat, lon)
+                                                    Toast.makeText(context, "Simulasi koordinat dijalankan!", Toast.LENGTH_SHORT).show()
+                                                } else {
+                                                    Toast.makeText(context, "Format koordinat tidak valid!", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            colors = ButtonDefaults.buttonColors(
+                                                containerColor = primaryTextColor,
+                                                contentColor = backgroundColor
+                                            ),
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Uji Koordinat", fontFamily = FontFamily.Default)
+                                        }
+
+                                        OutlinedButton(
+                                            onClick = {
+                                                viewModel.clearSimulation()
+                                                Toast.makeText(context, "Kembali ke GPS Live Hardware", Toast.LENGTH_SHORT).show()
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text("Reset GPS Live", fontFamily = FontFamily.Default)
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Button(
+                                        onClick = {
+                                            val debugText = """
+                                                === DEBUG DATA TELEMETRI GEOLOKASI DAERAH SINI ===
+                                                • Koordinat: ${state.latitude}, ${state.longitude} (Alt: ${state.altitude}m, Acc: ±${state.accuracyMeters}m)
+                                                • Provider: ${state.providerType}
+                                                • Status GPS: ${state.statusText}
+                                                • Satelit (GNSS): ${state.satellitesUsedInFix}/${state.satellitesInView} satelit in fix (${state.gnssConstellationsSummary})
+                                                • Hasil Spatial: ${if (state.gpsStatus == GpsStatus.OUT_OF_BOUNDS) "DI LUAR WILAYAH" else "MATCHED"}
+                                                • Lokasi: Kec. ${state.nameKecamatan}, ${state.nameKabupaten}, ${state.nameProvinsi}
+                                                • BBOX Candidates (${state.candidatesCount}): ${state.candidateNamesStr}
+                                                • Evaluated Vertices: ${state.evaluatedVertices} (Latency: ${state.searchLatencyMs} ms)
+                                            """.trimIndent()
+                                            clipboardManager.setText(AnnotatedString(debugText))
+                                            Toast.makeText(context, "Data telemetri debug disalin ke clipboard!", Toast.LENGTH_LONG).show()
+                                        },
+                                        colors = ButtonDefaults.buttonColors(
+                                            containerColor = primaryTextColor,
+                                            contentColor = backgroundColor
+                                        ),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Salin Data Debug Telemetri", fontFamily = FontFamily.Default)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     SettingsSubpage.ABOUT -> {
                         // Subpage 5: About App & Publisher Copyright
                         val appIconBitmap = remember(context) {
@@ -756,6 +1011,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     } else {
         // Main Dashboard Info Screen
         val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val effectiveBearing = if (state.speed > 2.5f && state.bearing != 0f) state.bearing else compassHeading
 
         val kecamatan = when {
             state.nameKecamatan.isNotEmpty() -> formatGeoName(state.nameKecamatan)
@@ -780,74 +1036,473 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
             modifier = Modifier
                 .fillMaxSize()
                 .background(backgroundColor)
-                .padding(horizontal = if (isLandscape) 32.dp else 24.dp, vertical = 16.dp)
+                .statusBarsPadding()
+                .navigationBarsPadding()
         ) {
-            // Small Settings Button in Top-Right corner
-            IconButton(
-                onClick = {
-                    currentSubpage = SettingsSubpage.MAIN
-                    showSettingsPage = true
-                },
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .size(40.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Pengaturan",
-                    tint = iconColor
-                )
-            }
-
-            // Center Content: Dashboard Info
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.Center),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
-            ) {
-                // Kecamatan (Main Focus)
-                Text(
-                    text = kecamatan,
-                    fontFamily = FontFamily.SansSerif, // Roboto
-                    fontSize = kecamatanFontSize,
-                    fontWeight = FontWeight.Bold,
-                    color = primaryTextColor,
-                    textAlign = TextAlign.Center,
-                    lineHeight = kecamatanLineHeight
-                )
-
-                if (kabupaten.isNotEmpty() || provinsi.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(spacingPrimary))
-
-                    // Kota / Kabupaten
-                    if (kabupaten.isNotEmpty()) {
-                        Text(
-                            text = kabupaten,
-                            fontFamily = FontFamily.SansSerif, // Roboto
-                            fontSize = kabupatenFontSize,
-                            fontWeight = FontWeight.Medium,
-                            color = secondaryTextColor,
-                            textAlign = TextAlign.Center
+            if (isLandscape) {
+                // 3-Panel Landscape Layout (Left: Vector Compass | Center: Location | Right: Speedometer & Settings)
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Panel 1: Vector Compass (Left)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        VectorCompassGauge(
+                            bearing = effectiveBearing,
+                            color = primaryTextColor,
+                            modifier = Modifier.size(175.dp)
                         )
                     }
 
-                    // Provinsi
-                    if (provinsi.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = provinsi,
-                            fontFamily = FontFamily.SansSerif, // Roboto
-                            fontSize = provinsiFontSize,
-                            fontWeight = FontWeight.Normal,
-                            color = secondaryTextColor.copy(alpha = 0.8f),
-                            textAlign = TextAlign.Center
-                        )
+                    // Vertical Divider 1
+                    Box(
+                        modifier = Modifier
+                            .width(2.dp)
+                            .fillMaxHeight(0.85f)
+                            .background(primaryTextColor)
+                    )
+
+                    // Panel 2: Location Text (Center)
+                    Box(
+                        modifier = Modifier
+                            .weight(1.3f)
+                            .fillMaxHeight()
+                            .padding(horizontal = 16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = kecamatan,
+                                fontFamily = FontFamily.SansSerif,
+                                fontSize = kecamatanFontSize,
+                                fontWeight = FontWeight.Bold,
+                                color = primaryTextColor,
+                                textAlign = TextAlign.Center,
+                                lineHeight = kecamatanLineHeight
+                            )
+
+                            if (kabupaten.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(spacingPrimary))
+                                Text(
+                                    text = kabupaten,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = kabupatenFontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = secondaryTextColor,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            if (provinsi.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = provinsi,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = provinsiFontSize,
+                                    fontWeight = FontWeight.Normal,
+                                    color = secondaryTextColor.copy(alpha = 0.8f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            if (nextKecamatanAhead.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                // Thin white divider line between current location and next kecamatan
+                                Box(
+                                    modifier = Modifier
+                                        .width(120.dp)
+                                        .height(1.dp)
+                                        .background(primaryTextColor.copy(alpha = 0.4f))
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = nextKecamatanAhead,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = (baseProvinsiSize.value * selectedTextScale.scale * 0.95f).sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = secondaryTextColor.copy(alpha = 0.85f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
                     }
+
+                    // Vertical Divider 2
+                    Box(
+                        modifier = Modifier
+                            .width(2.dp)
+                            .fillMaxHeight(0.85f)
+                            .background(primaryTextColor)
+                    )
+
+                    // Panel 3: Speedometer & Settings (Right)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                    ) {
+                        IconButton(
+                            onClick = {
+                                currentSubpage = SettingsSubpage.MAIN
+                                showSettingsPage = true
+                            },
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = "Pengaturan",
+                                tint = iconColor
+                            )
+                        }
+
+                        val speedKmH = (state.speed * 3.6f).roundToInt()
+                        Column(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            Text(
+                                text = "$speedKmH",
+                                fontSize = (88.sp.value * selectedTextScale.scale).sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.SansSerif,
+                                color = primaryTextColor
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "km/h",
+                                fontSize = (22.sp.value * selectedTextScale.scale).sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = FontFamily.SansSerif,
+                                color = secondaryTextColor
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Portrait Layout
+                IconButton(
+                    onClick = {
+                        currentSubpage = SettingsSubpage.MAIN
+                        showSettingsPage = true
+                    },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp)
+                        .size(40.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Pengaturan",
+                        tint = iconColor
+                    )
+                }
+
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    // Top Telemetry Header (Compass & Speed)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 16.dp, start = 8.dp, end = 48.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        VectorCompassGauge(
+                            bearing = effectiveBearing,
+                            color = primaryTextColor,
+                            modifier = Modifier.size(90.dp)
+                        )
+
+                        val speedKmH = (state.speed * 3.6f).roundToInt()
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "$speedKmH",
+                                fontSize = (48.sp.value * selectedTextScale.scale).sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.SansSerif,
+                                color = primaryTextColor
+                            )
+                            Text(
+                                text = "km/h",
+                                fontSize = (16.sp.value * selectedTextScale.scale).sp,
+                                fontWeight = FontWeight.Medium,
+                                fontFamily = FontFamily.SansSerif,
+                                color = secondaryTextColor
+                            )
+                        }
+                    }
+
+                    // Main Location Center Info
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = kecamatan,
+                            fontFamily = FontFamily.SansSerif,
+                            fontSize = kecamatanFontSize,
+                            fontWeight = FontWeight.Bold,
+                            color = primaryTextColor,
+                            textAlign = TextAlign.Center,
+                            lineHeight = kecamatanLineHeight
+                        )
+
+                        if (kabupaten.isNotEmpty() || provinsi.isNotEmpty() || nextKecamatanAhead.isNotEmpty()) {
+                            Spacer(modifier = Modifier.height(spacingPrimary))
+
+                            if (kabupaten.isNotEmpty()) {
+                                Text(
+                                    text = kabupaten,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = kabupatenFontSize,
+                                    fontWeight = FontWeight.Medium,
+                                    color = secondaryTextColor,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            if (provinsi.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Text(
+                                    text = provinsi,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = provinsiFontSize,
+                                    fontWeight = FontWeight.Normal,
+                                    color = secondaryTextColor.copy(alpha = 0.8f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+
+                            if (nextKecamatanAhead.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(12.dp))
+                                // Thin white divider line between current location and next kecamatan
+                                Box(
+                                    modifier = Modifier
+                                        .width(100.dp)
+                                        .height(1.dp)
+                                        .background(primaryTextColor.copy(alpha = 0.4f))
+                                )
+                                Spacer(modifier = Modifier.height(10.dp))
+                                Text(
+                                    text = nextKecamatanAhead,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontSize = (baseProvinsiSize.value * selectedTextScale.scale * 0.95f).sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = secondaryTextColor.copy(alpha = 0.85f),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(40.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun VectorCompassGauge(
+    bearing: Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    // Continuous shortest-path angle accumulator
+    var continuousAngle by remember { mutableStateOf(bearing) }
+
+    LaunchedEffect(bearing) {
+        val target = ((bearing % 360f) + 360f) % 360f
+        val current = ((continuousAngle % 360f) + 360f) % 360f
+        var diff = target - current
+        if (diff > 180f) diff -= 360f
+        if (diff <= -180f) diff += 360f
+        continuousAngle += diff
+    }
+
+    val animatedAngle by animateFloatAsState(
+        targetValue = continuousAngle,
+        animationSpec = spring(
+            stiffness = Spring.StiffnessMediumLow,
+            dampingRatio = Spring.DampingRatioNoBouncy
+        ),
+        label = "compassRotation"
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = modifier
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val diameter = minOf(size.width, size.height) * 0.92f
+                val strokeWidth = diameter * 0.035f
+                val radius = (diameter - strokeWidth) / 2f
+                val centerPoint = Offset(size.width / 2f, size.height / 2f)
+
+                // 1. ROTATING COMPASS DIAL (Ring & Cardinal Letters rotate together with -animatedAngle)
+                withTransform({
+                    rotate(degrees = -animatedAngle, pivot = centerPoint)
+                }) {
+                    // Outer Bezel Ring Circle
+                    drawCircle(
+                        color = color.copy(alpha = 0.35f),
+                        radius = radius,
+                        center = centerPoint,
+                        style = Stroke(width = strokeWidth)
+                    )
+
+                    // 24 Radial Ticks (Skipping 0°, 90°, 180°, 270° so cardinal letters U, T, S, B have clean slots with ZERO line overlap)
+                    for (i in 0 until 24) {
+                        val angleDeg = i * 15
+                        if (angleDeg % 90 == 0) {
+                            // Skip cardinal positions where U, T, S, B are placed!
+                            continue
+                        }
+
+                        val angleRad = Math.toRadians(angleDeg.toDouble())
+                        val isSemiCardinal = angleDeg % 45 == 0
+
+                        val tickLength = if (isSemiCardinal) diameter * 0.065f else diameter * 0.035f
+                        val tickWidth = if (isSemiCardinal) strokeWidth * 0.9f else strokeWidth * 0.45f
+
+                        val startX = centerPoint.x + (radius - tickLength) * Math.sin(angleRad).toFloat()
+                        val startY = centerPoint.y - (radius - tickLength) * Math.cos(angleRad).toFloat()
+                        val endX = centerPoint.x + (radius - strokeWidth * 0.5f) * Math.sin(angleRad).toFloat()
+                        val endY = centerPoint.y - (radius - strokeWidth * 0.5f) * Math.cos(angleRad).toFloat()
+
+                        drawLine(
+                            color = if (isSemiCardinal) color.copy(alpha = 0.75f) else color.copy(alpha = 0.35f),
+                            start = Offset(startX, startY),
+                            end = Offset(endX, endY),
+                            strokeWidth = tickWidth,
+                            cap = StrokeCap.Round
+                        )
+                    }
+
+                    // Text Paints for Cardinal Labels (U, T, S, B)
+                    val textPaint = android.graphics.Paint().apply {
+                        this.color = color.toArgb()
+                        this.textSize = diameter * 0.12f
+                        this.isFakeBoldText = true
+                        this.textAlign = android.graphics.Paint.Align.CENTER
+                        this.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    }
+
+                    val uPaint = android.graphics.Paint().apply {
+                        this.color = color.toArgb()
+                        this.textSize = diameter * 0.14f
+                        this.isFakeBoldText = true
+                        this.textAlign = android.graphics.Paint.Align.CENTER
+                        this.typeface = android.graphics.Typeface.DEFAULT_BOLD
+                    }
+
+                    val fontMetrics = textPaint.fontMetrics
+                    val textCenterOffset = (fontMetrics.descent - fontMetrics.ascent) / 2f - fontMetrics.descent
+                    val labelRadius = radius - (diameter * 0.08f)
+
+                    // U (Utara / North - Top of Ring at 0°)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "U",
+                        centerPoint.x,
+                        centerPoint.y - labelRadius + textCenterOffset,
+                        uPaint
+                    )
+
+                    // T (Timur / East - Right of Ring at 90°)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "T",
+                        centerPoint.x + labelRadius,
+                        centerPoint.y + textCenterOffset,
+                        textPaint
+                    )
+
+                    // S (Selatan / South - Bottom of Ring at 180°)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "S",
+                        centerPoint.x,
+                        centerPoint.y + labelRadius + textCenterOffset,
+                        textPaint
+                    )
+
+                    // B (Barat / West - Left of Ring at 270°)
+                    drawContext.canvas.nativeCanvas.drawText(
+                        "B",
+                        centerPoint.x - labelRadius,
+                        centerPoint.y + textCenterOffset,
+                        textPaint
+                    )
+                }
+
+                // 2. FIXED UPWARD NAVIGATION ARROWHEAD (Cleanly separated in center)
+                val arrowWidth = diameter * 0.20f
+                val arrowHeight = diameter * 0.26f
+                val topY = centerPoint.y - arrowHeight * 0.55f
+                val bottomY = centerPoint.y + arrowHeight * 0.35f
+                val indentY = centerPoint.y + arrowHeight * 0.06f
+
+                val arrowPath = Path().apply {
+                    moveTo(centerPoint.x, topY)
+                    lineTo(centerPoint.x + arrowWidth / 2f, bottomY)
+                    lineTo(centerPoint.x, indentY)
+                    lineTo(centerPoint.x - arrowWidth / 2f, bottomY)
+                    close()
+                }
+                drawPath(path = arrowPath, color = color)
+
+                // Center Accent Pivot Dot
+                drawCircle(
+                    color = color,
+                    radius = diameter * 0.025f,
+                    center = centerPoint
+                )
+            }
+        }
+
+        // Digital Heading Readout (e.g. 245° BD)
+        val normalizedDeg = ((animatedAngle % 360f) + 360f) % 360f
+        val cardinalName = when (((normalizedDeg + 22.5f) % 360 / 45).toInt()) {
+            0 -> "U"   // Utara
+            1 -> "TL"  // Timur Laut
+            2 -> "T"   // Timur
+            3 -> "TG"  // Tenggara
+            4 -> "S"   // Selatan
+            5 -> "BD"  // Barat Daya
+            6 -> "B"   // Barat
+            7 -> "BL"  // Barat Laut
+            else -> "U"
+        }
+        Text(
+            text = "${normalizedDeg.toInt()}° $cardinalName",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            fontFamily = FontFamily.SansSerif,
+            color = color.copy(alpha = 0.85f)
+        )
     }
 }
 
@@ -889,5 +1544,22 @@ private fun SettingsMenuItem(
             tint = secondaryTextColor,
             modifier = Modifier.size(24.dp)
         )
+    }
+}
+
+@Composable
+private fun DebugDataRow(
+    label: String,
+    value: String,
+    primaryColor: Color,
+    secondaryColor: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, fontSize = 13.sp, color = secondaryColor)
+        Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = primaryColor)
     }
 }

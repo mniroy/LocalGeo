@@ -11,6 +11,8 @@ data class SpatialResult(
     val nameKabupaten: String = "",
     val nameProvinsi: String = "",
     val evaluatedVertices: Int = 0,
+    val candidatesCount: Int = 0,
+    val candidateNames: List<String> = emptyList(),
     val executionTimeMs: Double = 0.0
 )
 
@@ -20,6 +22,7 @@ class PipEngine(private val dbHelper: SpatialDbHelper) {
         val startTime = System.nanoTime()
         try {
             val candidates = dbHelper.queryCandidateSubDistricts(lon, lat)
+            val candidateNames = candidates.map { it.nameKecamatan }
             var totalVerticesEvaluated = 0
 
             for (candidate in candidates) {
@@ -36,6 +39,8 @@ class PipEngine(private val dbHelper: SpatialDbHelper) {
                         nameKabupaten = candidate.nameKabupaten,
                         nameProvinsi = candidate.nameProvinsi,
                         evaluatedVertices = totalVerticesEvaluated,
+                        candidatesCount = candidates.size,
+                        candidateNames = candidateNames,
                         executionTimeMs = elapsedMs
                     )
                 }
@@ -43,7 +48,13 @@ class PipEngine(private val dbHelper: SpatialDbHelper) {
 
             val elapsedMs = (System.nanoTime() - startTime) / 1_000_000.0
             Log.d("PipEngine", "No match for ($lat,$lon). Vertices evaluated=$totalVerticesEvaluated")
-            return SpatialResult(matched = false, evaluatedVertices = totalVerticesEvaluated, executionTimeMs = elapsedMs)
+            return SpatialResult(
+                matched = false,
+                evaluatedVertices = totalVerticesEvaluated,
+                candidatesCount = candidates.size,
+                candidateNames = candidateNames,
+                executionTimeMs = elapsedMs
+            )
         } catch (e: Exception) {
             Log.e("PipEngine", "findSubDistrict error", e)
             return SpatialResult(matched = false)
@@ -102,36 +113,90 @@ class PipEngine(private val dbHelper: SpatialDbHelper) {
         }
     }
 
+    /**
+     * W. Randolph Franklin (WRF) Point-in-Polygon Ray Casting algorithm.
+     * Evaluates whether point (px, py) is strictly inside polygon described by lons and lats arrays.
+     */
     private fun isPointInPolygon(
         px: Double, py: Double,
         lons: DoubleArray, lats: DoubleArray,
         numPts: Int
     ): Boolean {
         var inside = false
-        var p1x = lons[0]
-        var p1y = lats[0]
+        var j = numPts - 1
+        for (i in 0 until numPts) {
+            val xi = lons[i]
+            val yi = lats[i]
+            val xj = lons[j]
+            val yj = lats[j]
 
-        for (i in 1..numPts) {
-            val p2x = lons[i % numPts]
-            val p2y = lats[i % numPts]
-
-            if (py > minOf(p1y, p2y)) {
-                if (py <= maxOf(p1y, p2y)) {
-                    if (px <= maxOf(p1x, p2x)) {
-                        if (p1y != p2y) {
-                            val xinters = (py - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                            if (p1x == p2x || px <= xinters) {
-                                inside = !inside
-                            }
-                        } else if (p1x == p2x || px <= p1x) {
-                            inside = !inside
-                        }
-                    }
-                }
+            val intersect = ((yi > py) != (yj > py)) &&
+                    (px < (xj - xi) * (py - yi) / (yj - yi) + xi)
+            if (intersect) {
+                inside = !inside
             }
-            p1x = p2x
-            p1y = p2y
+            j = i
         }
         return inside
     }
+
+    /**
+     * Projects forward along bearingDeg to find the next kecamatan and its boundary distance.
+     */
+    fun findNextSubDistrictAhead(
+        currentLon: Double,
+        currentLat: Double,
+        currentKecamatan: String,
+        bearingDeg: Float,
+        maxDistanceKm: Double = 35.0,
+        stepKm: Double = 0.3
+    ): NextKecamatanResult? {
+        if (currentLat == 0.0 && currentLon == 0.0) return null
+
+        var d = stepKm
+        while (d <= maxDistanceKm) {
+            val (projLat, projLon) = projectCoordinate(currentLat, currentLon, d, bearingDeg.toDouble())
+            val result = findSubDistrict(projLon, projLat)
+            if (result.matched && result.nameKecamatan.isNotEmpty() &&
+                !result.nameKecamatan.equals(currentKecamatan, ignoreCase = true)
+            ) {
+                return NextKecamatanResult(
+                    nameKecamatan = result.nameKecamatan,
+                    nameKabupaten = result.nameKabupaten,
+                    distanceKm = d
+                )
+            }
+            d += stepKm
+        }
+        return null
+    }
+
+    private fun projectCoordinate(
+        lat: Double,
+        lon: Double,
+        distanceKm: Double,
+        bearingDeg: Double
+    ): Pair<Double, Double> {
+        val r = 6371.0
+        val dByR = distanceKm / r
+        val latRad = Math.toRadians(lat)
+        val lonRad = Math.toRadians(lon)
+        val brngRad = Math.toRadians(bearingDeg)
+
+        val lat2Rad = Math.asin(
+            Math.sin(latRad) * Math.cos(dByR) + Math.cos(latRad) * Math.sin(dByR) * Math.cos(brngRad)
+        )
+        val lon2Rad = lonRad + Math.atan2(
+            Math.sin(brngRad) * Math.sin(dByR) * Math.cos(latRad),
+            Math.cos(dByR) - Math.sin(latRad) * Math.sin(lat2Rad)
+        )
+
+        return Pair(Math.toDegrees(lat2Rad), Math.toDegrees(lon2Rad))
+    }
 }
+
+data class NextKecamatanResult(
+    val nameKecamatan: String,
+    val nameKabupaten: String = "",
+    val distanceKm: Double = 0.0
+)

@@ -47,9 +47,10 @@ class PipEngineTest {
                     }
                 }
             }
-            p1x = p2x
-            p1y = p2y
-        }
-        return inside
+    @Test
+    @org.junit.Ignore("Manual DB test")
+    fun testRealDatabaseLookup() {
+        val dbFile = java.io.File("app/src/main/assets/indonesia_kecamatan.db")
+        assertTrue("Asset DB exists", dbFile.exists())
     }
 }

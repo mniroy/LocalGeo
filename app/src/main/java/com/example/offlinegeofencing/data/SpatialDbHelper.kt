@@ -19,11 +19,11 @@ class SpatialDbHelper(private val context: Context) : SQLiteOpenHelper(context, 
     companion object {
         private const val TAG = "SpatialDbHelper"
         private const val DB_NAME = "indonesia_kecamatan.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
 
-        // Margin to compensate for polygon simplification (epsilon=0.003 during preprocessing).
+        // Margin to compensate for polygon bounding box search.
         // PIP ray-casting eliminates false positives precisely.
-        private const val BBOX_MARGIN = 0.005
+        private const val BBOX_MARGIN = 0.015
     }
 
     init {
@@ -33,15 +33,22 @@ class SpatialDbHelper(private val context: Context) : SQLiteOpenHelper(context, 
     private fun copyDatabaseIfNeededSync() {
         try {
             val dbFile = context.getDatabasePath(DB_NAME)
-            if (!dbFile.exists()) {
+            val prefs = context.getSharedPreferences("spatial_db_prefs", Context.MODE_PRIVATE)
+            val currentVersion = prefs.getInt("db_version", 0)
+
+            if (!dbFile.exists() || currentVersion < DB_VERSION) {
                 dbFile.parentFile?.mkdirs()
-                Log.d(TAG, "Copying $DB_NAME from assets...")
+                if (dbFile.exists()) {
+                    dbFile.delete()
+                }
+                Log.d(TAG, "Copying $DB_NAME from assets (target DB_VERSION=$DB_VERSION)...")
                 context.assets.open(DB_NAME).use { input ->
                     FileOutputStream(dbFile).use { output ->
                         input.copyTo(output)
                     }
                 }
-                Log.d(TAG, "Database copy complete.")
+                prefs.edit().putInt("db_version", DB_VERSION).apply()
+                Log.d(TAG, "Database copy complete. Updated DB_VERSION to $DB_VERSION.")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error copying database: ${e.message}", e)

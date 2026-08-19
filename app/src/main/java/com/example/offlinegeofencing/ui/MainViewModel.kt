@@ -17,6 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.SharingStarted
+import com.example.offlinegeofencing.sensor.CompassSensorManager
+import com.example.offlinegeofencing.spatial.NextKecamatanResult
 import kotlinx.coroutines.launch
 
 data class SimulationPoint(
@@ -29,6 +35,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val trackingState: StateFlow<TrackingState> = GeofenceTrackingService.trackingState
 
+    private val compassSensorManager by lazy { CompassSensorManager(getApplication()) }
+    val compassHeading: StateFlow<Float> = compassSensorManager.headingFlow
+
     private val bluetoothManager by lazy { BluetoothManager.getInstance(getApplication()) }
     val bluetoothState = bluetoothManager.connectionState
 
@@ -39,6 +48,55 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _simulatedState = MutableStateFlow<TrackingState?>(null)
     val simulatedState: StateFlow<TrackingState?> = _simulatedState.asStateFlow()
+
+    val nextKecamatanAhead: StateFlow<String> = combine(
+        trackingState,
+        simulatedState,
+        compassHeading
+    ) { live, sim, heading ->
+        val state = sim ?: live
+        val effectiveBearing = if (state.speed > 2.5f && state.bearing != 0f) state.bearing else heading
+        if (state.latitude != 0.0 && state.longitude != 0.0 && state.nameKecamatan.isNotEmpty()) {
+            val next = pipEngine.findNextSubDistrictAhead(
+                currentLon = state.longitude,
+                currentLat = state.latitude,
+                currentKecamatan = state.nameKecamatan,
+                bearingDeg = effectiveBearing
+            )
+            if (next != null) {
+                val formattedName = next.nameKecamatan
+                    .replace(Regex("([a-z])([A-Z])"), "$1 $2")
+                    .replace(Regex("([A-Z]+)([A-Z][a-z])"), "$1 $2")
+                    .trim()
+                "%.1f km to %s".format(next.distanceKm, formattedName)
+            } else {
+                ""
+            }
+        } else {
+            ""
+        }
+    }.flowOn(Dispatchers.Default).stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = ""
+    )
+
+    init {
+        compassSensorManager.start()
+    }
+
+    fun startCompass() {
+        compassSensorManager.start()
+    }
+
+    fun stopCompass() {
+        compassSensorManager.stop()
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        compassSensorManager.stop()
+    }
 
     val samplePoints = listOf(
         SimulationPoint("Monas, Gambir (Jakarta Pusat)", -6.1754, 106.8272),
@@ -97,6 +155,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch(Dispatchers.Default) {
             try {
                 val result = pipEngine.findSubDistrict(lon, lat)
+                val candidateNamesStr = result.candidateNames.joinToString(", ")
                 val state = if (result.matched) {
                     TrackingState(
                         gpsStatus = GpsStatus.SATELLITE_LOCKED,
@@ -107,6 +166,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         nameKabupaten = result.nameKabupaten,
                         nameProvinsi = result.nameProvinsi,
                         evaluatedVertices = result.evaluatedVertices,
+                        candidatesCount = result.candidatesCount,
+                        candidateNamesStr = candidateNamesStr,
                         searchLatencyMs = result.executionTimeMs,
                         statusText = "Simulasi Offline (±5m)"
                     )
@@ -117,6 +178,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         latitude = lat,
                         longitude = lon,
                         evaluatedVertices = result.evaluatedVertices,
+                        candidatesCount = result.candidatesCount,
+                        candidateNamesStr = candidateNamesStr,
                         searchLatencyMs = result.executionTimeMs,
                         statusText = "Di Luar Batas Wilayah Darat / Perairan"
                     )

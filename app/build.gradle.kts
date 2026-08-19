@@ -11,8 +11,8 @@ android {
         applicationId = "com.example.offlinegeofencing"
         minSdk = 29
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.2.0"
+        versionCode = 3
+        versionName = "1.3.0"
     }
 
     buildTypes {

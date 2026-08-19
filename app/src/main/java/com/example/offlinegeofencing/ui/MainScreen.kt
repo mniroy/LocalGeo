@@ -2,6 +2,7 @@ package com.example.offlinegeofencing.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.content.res.Configuration
@@ -9,6 +10,7 @@ import android.os.Build
 import android.view.View
 import android.view.WindowInsets
 import android.view.WindowInsetsController
+import android.view.WindowManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -44,6 +46,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.offlinegeofencing.bluetooth.BluetoothConnectionState
+import com.example.offlinegeofencing.service.GeofenceTrackingService
 import com.example.offlinegeofencing.service.GpsStatus
 
 import android.widget.Toast
@@ -93,7 +96,7 @@ enum class SettingsSubpage(val title: String) {
     DISPLAY("Tampilan & Rotasi Layar"),
     THEME("Tema Warna"),
     NOTIFICATION("Notifikasi Persisten"),
-    DEBUG("Fitur Debug & Telemetry GPS"),
+    DEBUG("Detail Telemetry"),
     ABOUT("Tentang Aplikasi")
 }
 
@@ -123,15 +126,21 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     var selectedRotation by remember { mutableStateOf(ScreenRotation.AUTO) }
     var selectedTextScale by remember { mutableStateOf(TextSizeScale.NORMAL) }
     var isFullScreen by remember { mutableStateOf(false) }
+    var isKeepScreenOn by remember { mutableStateOf(false) }
     var showSettingsPage by remember { mutableStateOf(false) }
     var currentSubpage by remember { mutableStateOf(SettingsSubpage.MAIN) }
+    var showExitDialog by remember { mutableStateOf(false) }
 
-    // Intercept hardware system back button when settings page or subpage is active
-    BackHandler(enabled = showSettingsPage) {
-        if (currentSubpage != SettingsSubpage.MAIN) {
-            currentSubpage = SettingsSubpage.MAIN
+    // Intercept hardware system back button
+    BackHandler(enabled = true) {
+        if (showSettingsPage) {
+            if (currentSubpage != SettingsSubpage.MAIN) {
+                currentSubpage = SettingsSubpage.MAIN
+            } else {
+                showSettingsPage = false
+            }
         } else {
-            showSettingsPage = false
+            showExitDialog = true
         }
     }
 
@@ -193,6 +202,19 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
     // Apply orientation when changed
     LaunchedEffect(selectedRotation) {
         activity?.requestedOrientation = selectedRotation.orientation
+    }
+
+    // Apply Keep Screen On when changed
+    DisposableEffect(isKeepScreenOn) {
+        val window = activity?.window
+        if (isKeepScreenOn) {
+            window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        } else {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
     }
 
     // Apply Full-Screen Immersive Mode when changed
@@ -308,7 +330,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.15f))
 
                             // Menu 2: Display & Rotation
-                            val displaySubtitle = "Ukuran Teks (${selectedTextScale.label.split(" ")[0]}), Layar Penuh (${if (isFullScreen) "Aktif" else "Nonaktif"}), Rotasi"
+                            val displaySubtitle = "Layar Selalu Nyala (${if (isKeepScreenOn) "Aktif" else "Nonaktif"}), Layar Penuh (${if (isFullScreen) "Aktif" else "Nonaktif"}), Rotasi"
                             SettingsMenuItem(
                                 title = "Tampilan & Rotasi Layar",
                                 subtitle = displaySubtitle,
@@ -342,10 +364,10 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
 
                             HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.15f))
 
-                            // Menu 5: Debug & Telemetry GPS
+                            // Menu 5: Detail Telemetry
                             val debugSubtitle = "Koordinat: ${"%.4f".format(state.latitude)}, ${"%.4f".format(state.longitude)} • Satelit: ${state.satellitesUsedInFix}/${state.satellitesInView}"
                             SettingsMenuItem(
-                                title = "Fitur Debug & Telemetry GPS",
+                                title = "Detail Telemetry",
                                 subtitle = debugSubtitle,
                                 primaryTextColor = primaryTextColor,
                                 secondaryTextColor = secondaryTextColor,
@@ -357,7 +379,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             // Menu 6: About App
                             SettingsMenuItem(
                                 title = "Tentang Aplikasi",
-                                subtitle = "Versi 1.0.0 • © MNIROY",
+                                subtitle = "Versi 1.3.0 • © MNIROY",
                                 primaryTextColor = primaryTextColor,
                                 secondaryTextColor = secondaryTextColor,
                                 onClick = { currentSubpage = SettingsSubpage.ABOUT }
@@ -500,10 +522,46 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                     }
 
                     SettingsSubpage.DISPLAY -> {
-                        // Subpage 2: Display, Full-Screen, Text Size & Rotation
+                        // Subpage 2: Display, Full-Screen, Keep Screen On, Text Size & Rotation
                         Column(
                             verticalArrangement = Arrangement.spacedBy(20.dp)
                         ) {
+                            // Keep Screen On Toggle
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Text(
+                                    text = "LAYAR SELALU MENYALA",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    fontFamily = FontFamily.SansSerif,
+                                    color = secondaryTextColor,
+                                    letterSpacing = 1.sp
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { isKeepScreenOn = !isKeepScreenOn }
+                                        .padding(vertical = 8.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "Layar Selalu Menyala (Keep Screen On)",
+                                        fontSize = 16.sp,
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontWeight = FontWeight.Medium,
+                                        color = primaryTextColor,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Switch(
+                                        checked = isKeepScreenOn,
+                                        onCheckedChange = { isKeepScreenOn = it }
+                                    )
+                                }
+                            }
+
+                            HorizontalDivider(color = secondaryTextColor.copy(alpha = 0.2f))
+
                             // Full-Screen Immersive Mode Toggle
                             Column(modifier = Modifier.fillMaxWidth()) {
                                 Text(
@@ -523,25 +581,14 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Layar Penuh (Immersive Mode)",
-                                            fontSize = 16.sp,
-                                            fontFamily = FontFamily.SansSerif,
-                                            fontWeight = FontWeight.Medium,
-                                            color = primaryTextColor
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            text = if (isFullScreen)
-                                                "Status bar & bar navigasi sistem disembunyikan"
-                                            else
-                                                "Tampilkan status bar & bar navigasi standar",
-                                            fontSize = 13.sp,
-                                            fontFamily = FontFamily.SansSerif,
-                                            color = secondaryTextColor
-                                        )
-                                    }
+                                    Text(
+                                        text = "Layar Penuh (Immersive Mode)",
+                                        fontSize = 16.sp,
+                                        fontFamily = FontFamily.SansSerif,
+                                        fontWeight = FontWeight.Medium,
+                                        color = primaryTextColor,
+                                        modifier = Modifier.weight(1f)
+                                    )
                                     Switch(
                                         checked = isFullScreen,
                                         onCheckedChange = { isFullScreen = it }
@@ -675,29 +722,18 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { viewModel.setNotificationPersistent(!isPersistentNotification) }
-                                    .padding(vertical = 12.dp),
+                                    .padding(vertical = 8.dp),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = "Notifikasi Persisten (Ongoing)",
-                                        fontSize = 16.sp,
-                                        fontFamily = FontFamily.SansSerif,
-                                        fontWeight = FontWeight.Medium,
-                                        color = primaryTextColor
-                                    )
-                                    Spacer(modifier = Modifier.height(4.dp))
-                                    Text(
-                                        text = if (isPersistentNotification)
-                                            "Notifikasi tidak dapat diusap/dihapus (Background Service Tetap Aktif)"
-                                        else
-                                            "Notifikasi dapat diusap/dihapus oleh pengguna",
-                                        fontSize = 13.sp,
-                                        fontFamily = FontFamily.SansSerif,
-                                        color = secondaryTextColor
-                                    )
-                                }
+                                Text(
+                                    text = "Notifikasi Persisten (Ongoing)",
+                                    fontSize = 16.sp,
+                                    fontFamily = FontFamily.SansSerif,
+                                    fontWeight = FontWeight.Medium,
+                                    color = primaryTextColor,
+                                    modifier = Modifier.weight(1f)
+                                )
                                 Switch(
                                     checked = isPersistentNotification,
                                     onCheckedChange = { viewModel.setNotificationPersistent(it) }
@@ -958,7 +994,7 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "Versi 1.0.0",
+                                text = "Versi 1.3.0",
                                 fontSize = 14.sp,
                                 fontFamily = FontFamily.SansSerif,
                                 color = secondaryTextColor
@@ -1317,6 +1353,91 @@ fun MainScreen(viewModel: MainViewModel = viewModel()) {
                 }
             }
         }
+    }
+
+    if (showExitDialog) {
+        AlertDialog(
+            onDismissRequest = { showExitDialog = false },
+            containerColor = if (isDark) Color(0xFF1E1E1E) else Color.White,
+            titleContentColor = primaryTextColor,
+            textContentColor = secondaryTextColor,
+            title = {
+                Text(
+                    text = "Keluar Aplikasi",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 20.sp,
+                    fontFamily = FontFamily.SansSerif
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "Pilih opsi keluar:",
+                        fontSize = 14.sp,
+                        color = secondaryTextColor,
+                        fontFamily = FontFamily.SansSerif
+                    )
+
+                    // Option 1: Minimize
+                    OutlinedButton(
+                        onClick = {
+                            showExitDialog = false
+                            activity?.moveTaskToBack(true)
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            contentColor = primaryTextColor
+                        )
+                    ) {
+                        Text(
+                            text = "Minimize (Latar Belakang)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // Option 2: Kill
+                    Button(
+                        onClick = {
+                            showExitDialog = false
+                            viewModel.disconnectBluetooth()
+                            val stopIntent = Intent(context, GeofenceTrackingService::class.java).apply {
+                                action = GeofenceTrackingService.ACTION_STOP_SERVICE
+                            }
+                            context.startService(stopIntent)
+                            activity?.finishAffinity()
+                            android.os.Process.killProcess(android.os.Process.myPid())
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = Color(0xFFDC2626),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Text(
+                            text = "Kill (Tutup Total)",
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showExitDialog = false }) {
+                    Text(
+                        text = "Batal",
+                        color = secondaryTextColor,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        )
     }
 }
 
